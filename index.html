@@ -1,0 +1,217 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Restaurant | مطعم</title>
+  <link rel="manifest" href="manifest.json">
+  <meta name="theme-color" content="#c0392b">
+  <style>
+    * { box-sizing: border-box; margin: 0; font-family: system-ui, sans-serif; }
+    body { background: #f9f6f0; color: #2d2d2d; padding: 16px; }
+    header { text-align: center; margin-bottom: 24px; }
+    .auth-bar { text-align: center; margin-bottom: 16px; font-size: 14px; }
+    .auth-bar button { margin: 0 4px; padding: 6px 12px; cursor: pointer; border: none; border-radius: 6px; background: #2d2d2d; color: #fff; }
+    .menu-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 16px; max-width: 900px; margin: auto; }
+    .item { background: white; border-radius: 12px; padding: 16px; box-shadow: 0 2px 8px rgba(0,0,0,0.06); }
+    .item h3 { font-size: 1rem; }
+    .item .price { color: #c0392b; font-weight: bold; margin: 8px 0; }
+    .item button { width: 100%; background: #2d2d2d; color: white; border: none; padding: 8px; border-radius: 6px; cursor: pointer; }
+    .cart { position: fixed; bottom: 16px; left: 16px; background: white; border-radius: 12px; padding: 12px; box-shadow: 0 4px 16px rgba(0,0,0,0.15); width: 260px; max-width: 90vw; font-size: 14px; }
+    .cart ul { list-style: none; padding: 0; max-height: 120px; overflow-y: auto; }
+    .cart li { display: flex; justify-content: space-between; margin-bottom: 4px; }
+    .cart .total { font-weight: bold; border-top: 1px solid #ddd; padding-top: 6px; margin-top: 6px; }
+    .cart button { width: 100%; background: #c0392b; color: white; border: none; padding: 10px; border-radius: 6px; margin-top: 8px; cursor: pointer; }
+    .auth-modal { display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.5); align-items: center; justify-content: center; z-index: 100; }
+    .auth-box { background: white; padding: 24px; border-radius: 12px; width: 300px; }
+    .auth-box input { width: 100%; padding: 8px; margin-bottom: 8px; border: 1px solid #ccc; border-radius: 4px; }
+    .auth-box button { width: 100%; padding: 10px; margin-bottom: 8px; cursor: pointer; border: none; border-radius: 4px; }
+    .auth-box .btn-primary { background: #2d2d2d; color: white; }
+    .auth-box .btn-google { background: #db4437; color: white; }
+    .auth-box .btn-close { background: #eee; }
+  </style>
+</head>
+<body>
+
+<header>
+  <h1>🍴 Restaurant</h1>
+  <div class="auth-bar" id="authBar">
+    <span id="userStatus">غير مسجل</span>
+    <button onclick="openAuth()">تسجيل الدخول</button>
+    <button onclick="signOutUser()" id="logoutBtn" style="display:none;">خروج</button>
+  </div>
+</header>
+
+<div class="menu-grid" id="menuGrid"></div>
+
+<div class="cart">
+  <h4>🛒 السلة</h4>
+  <ul id="cartList"></ul>
+  <div class="total" id="cartTotal">المجموع: 0</div>
+  <button onclick="placeOrder()">إتمام الطلب</button>
+</div>
+
+<div class="auth-modal" id="authModal">
+  <div class="auth-box">
+    <h3 style="margin-bottom:12px;">تسجيل الدخول</h3>
+    <input type="email" id="emailInput" placeholder="البريد الإلكتروني">
+    <input type="password" id="passwordInput" placeholder="كلمة المرور">
+    <button class="btn-primary" onclick="signUp()">تسجيل جديد</button>
+    <button class="btn-primary" onclick="signIn()">دخول بالبريد</button>
+    <button class="btn-google" onclick="signInWithGoogle()">دخول بـ Google</button>
+    <button class="btn-close" onclick="closeAuth()">إغلاق</button>
+  </div>
+</div>
+
+<script type="module">
+  import { initializeApp } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-app.js";
+  import { getAuth, createUserWithEmailAndPassword, signInWithEmailAndPassword, GoogleAuthProvider, signInWithPopup, onAuthStateChanged, signOut } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-auth.js";
+  import { getFirestore, collection, addDoc, serverTimestamp } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore.js";
+
+  // ====== استبدل هذا بـ firebaseConfig الخاص بك ======
+  const firebaseConfig = {
+    apiKey: "YOUR_API_KEY",
+    authDomain: "YOUR_PROJECT.firebaseapp.com",
+    projectId: "YOUR_PROJECT_ID",
+    storageBucket: "YOUR_PROJECT.appspot.com",
+    messagingSenderId: "YOUR_SENDER_ID",
+    appId: "YOUR_APP_ID"
+  };
+  // =================================================
+
+  const app = initializeApp(firebaseConfig);
+  const auth = getAuth(app);
+  const db = getFirestore(app);
+  const googleProvider = new GoogleAuthProvider();
+
+  const menu = [
+    { id: 1, name: "برجر كلاسيك", price: 25 },
+    { id: 2, name: "بيتزا مارغريتا", price: 30 },
+    { id: 3, name: "شاورما دجاج", price: 18 },
+    { id: 4, name: "سلطة سيزر", price: 15 },
+    { id: 5, name: "عصير برتقال", price: 8 },
+  ];
+  let cart = [];
+  let currentUser = null;
+
+  const grid = document.getElementById('menuGrid');
+  menu.forEach(item => {
+    const div = document.createElement('div');
+    div.className = 'item';
+    div.innerHTML = `<h3>${item.name}</h3><div class="price">${item.price} ر.س</div><button onclick="addToCart(${item.id})">أضف</button>`;
+    grid.appendChild(div);
+  });
+
+  window.addToCart = (id) => {
+    const item = menu.find(m => m.id === id);
+    const existing = cart.find(c => c.id === id);
+    if (existing) existing.qty++;
+    else cart.push({ ...item, qty: 1 });
+    renderCart();
+  };
+
+  function renderCart() {
+    const list = document.getElementById('cartList');
+    let total = 0;
+    list.innerHTML = '';
+    cart.forEach(c => {
+      total += c.price * c.qty;
+      const li = document.createElement('li');
+      li.innerHTML = `<span>${c.name} ×${c.qty}</span><span>${c.price * c.qty}</span>`;
+      list.appendChild(li);
+    });
+    document.getElementById('cartTotal').textContent = `المجموع: ${total} ر.س`;
+  }
+
+  window.placeOrder = async () => {
+    if (!currentUser) { alert('الرجاء تسجيل الدخول أولاً'); openAuth(); return; }
+    if (cart.length === 0) { alert('السلة فارغة'); return; }
+
+    const total = cart.reduce((s, c) => s + c.price * c.qty, 0);
+    try {
+      await addDoc(collection(db, "orders"), {
+        userId: currentUser.uid,
+        userEmail: currentUser.email,
+        items: cart.map(c => ({ name: c.name, qty: c.qty, price: c.price })),
+        total: total,
+        status: "pending",
+        createdAt: serverTimestamp()
+      });
+      alert(`✅ تم إرسال طلبك! المجموع: ${total} ر.س`);
+      cart = [];
+      renderCart();
+    } catch (e) {
+      alert("فشل حفظ الطلب: " + e.message);
+    }
+  };
+
+  window.openAuth = () => document.getElementById('authModal').style.display = 'flex';
+  window.closeAuth = () => document.getElementById('authModal').style.display = 'none';
+
+  window.signUp = async () => {
+    const email = document.getElementById('emailInput').value;
+    const pass = document.getElementById('passwordInput').value;
+    try { await createUserWithEmailAndPassword(auth, email, pass); closeAuth(); }
+    catch (e) { alert("فشل التسجيل: " + e.message); }
+  };
+
+  window.signIn = async () => {
+    const email = document.getElementById('emailInput').value;
+    const pass = document.getElementById('passwordInput').value;
+    try { await signInWithEmailAndPassword(auth, email, pass); closeAuth(); }
+    catch (e) { alert("فشل الدخول: " + e.message); }
+  };
+
+  window.signInWithGoogle = async () => {
+    try { await signInWithPopup(auth, googleProvider); closeAuth(); }
+    catch (e) { alert("فشل دخول Google: " + e.message); }
+  };
+
+  window.signOutUser = () => signOut(auth);
+
+  onAuthStateChanged(auth, (user) => {
+    currentUser = user;
+    document.getElementById('userStatus').textContent = user ? (user.displayName || user.email) : 'غير مسجل';
+    document.getElementById('logoutBtn').style.display = user ? 'inline' : 'none';
+  });
+</script>
+
+<script type="module">
+  import { initializeApp } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-app.js";
+  import { getMessaging, getToken, onMessage } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-messaging.js";
+  import { getFirestore, doc, setDoc } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore.js";
+  import { getAuth, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-auth.js";
+
+  const firebaseConfig = {
+    apiKey: "YOUR_API_KEY",
+    authDomain: "YOUR_PROJECT.firebaseapp.com",
+    projectId: "YOUR_PROJECT_ID",
+    storageBucket: "YOUR_PROJECT.appspot.com",
+    messagingSenderId: "YOUR_SENDER_ID",
+    appId: "YOUR_APP_ID"
+  };
+
+  const app = initializeApp(firebaseConfig);
+  const messaging = getMessaging(app);
+  const db = getFirestore(app);
+  const auth = getAuth(app);
+
+  onAuthStateChanged(auth, async (user) => {
+    if (!user) return;
+    try {
+      const permission = await Notification.requestPermission();
+      if (permission !== 'granted') return;
+      const token = await getToken(messaging, { vapidKey: "YOUR_VAPID_KEY" });
+      if (token) {
+        await setDoc(doc(db, "fcmTokens", user.uid), { token, updatedAt: new Date() });
+      }
+    } catch (e) { console.warn("FCM error", e); }
+  });
+
+  onMessage(messaging, (payload) => {
+    console.log("Foreground message:", payload);
+  });
+</script>
+
+</body>
+</html>
